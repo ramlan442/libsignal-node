@@ -40,7 +40,13 @@ class SessionBuilder {
             let record = await this.storage.loadSession(fqAddr);
             if (!record) {
                 record = new SessionRecord();
-            } 
+            } else {
+                const openSession = record.getOpenSession();
+                if (openSession) {
+                    console.warn("Closing stale open session for new outgoing prekey bundle");
+                    record.closeSession(openSession);
+                }
+            }
             record.setSession(session);
             await this.storage.storeSession(fqAddr, record);
         });
@@ -63,7 +69,11 @@ class SessionBuilder {
         if (!signedPreKeyPair) { 
             throw new errors.PreKeyError("Missing SignedPreKey");
         }   
-
+        const existingOpenSession = record.getOpenSession();
+        if (existingOpenSession) {
+            console.warn("Closing open session in favor of incoming prekey bundle");
+            record.closeSession(existingOpenSession);
+        }
         record.setSession(await this.initSession(false, preKeyPair, signedPreKeyPair,
                                                  message.identityKey, message.baseKey,
                                                  undefined, message.registrationId));
