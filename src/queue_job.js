@@ -12,20 +12,23 @@ const _gcLimit = 10000;
 
 async function _asyncQueueExecutor(queue, cleanup) {
     let offt = 0;
+    const gcLimit = _gcLimit;
+    const queueLength = queue.length;
+  
     while (true) {
-        let limit = Math.min(queue.length, _gcLimit); // Break up thundering hurds for GC duty.
-        for (let i = offt; i < limit; i++) {
-            const job = queue[i];
+        let limit = Math.min(queueLength, gcLimit);
+        for (const job of queue.slice(offt, limit)) {
             try {
                 job.resolve(await job.awaitable());
             } catch(e) {
                 job.reject(e);
             }
         }
-        if (limit < queue.length) {
-            /* Perform lazy GC of queue for faster iteration. */
-            if (limit >= _gcLimit) {
-                queue.splice(0, limit);
+        if (limit < queueLength) {
+            if (limit >= gcLimit) {
+                while (limit--) {
+                    queue.shift();
+                }
                 offt = 0;
             } else {
                 offt = limit;
@@ -37,6 +40,7 @@ async function _asyncQueueExecutor(queue, cleanup) {
     cleanup();
 }
 
+
 module.exports = function(bucket, awaitable) {
     /* Run the async awaitable only when all other async calls registered
      * here have completed (or thrown).  The bucket argument is a hashable
@@ -47,7 +51,7 @@ module.exports = function(bucket, awaitable) {
         if (typeof bucket === 'string') {
             awaitable.name = bucket;
         } else {
-            console.warn("Unhandled bucket type (for naming):", typeof bucket, bucket);
+            // // console.warn("Unhandled bucket type (for naming):", typeof bucket, bucket);
         }
     }
     let inactive;

@@ -167,14 +167,6 @@ const migrations = [{
                     sessions[key].registrationId = data.registrationId;
                 }
             }
-        } else {
-            for (const key in sessions) {
-                if (sessions[key].indexInfo.closed === -1) {
-                    console.error('V1 session storage migration error: registrationId',
-                                  data.registrationId, 'for open session version',
-                                  data.version);
-                }
-            }
         }
     }
 }];
@@ -190,7 +182,7 @@ class SessionRecord {
         let run = (data.version === undefined);
         for (let i = 0; i < migrations.length; ++i) {
             if (run) {
-                console.info("Migrating session to:", migrations[i].version);
+                // console.info("Migrating session to:", migrations[i].version);
                 migrations[i].migrate(data);
             } else if (migrations[i].version === data.version) {
                 run = true;
@@ -237,6 +229,7 @@ class SessionRecord {
 
     getSession(key) {
         assertBuffer(key);
+        this.detectDuplicateOpenSessions();
         const session = this.sessions[key.toString('base64')];
         if (session && session.indexInfo.baseKeyType === BaseKeyType.OURS) {
             throw new Error("Tried to lookup a session using our basekey");
@@ -245,6 +238,7 @@ class SessionRecord {
     }
 
     getOpenSession() {
+        this.detectDuplicateOpenSessions();
         for (const session of Object.values(this.sessions)) {
             if (!this.isClosed(session)) {
                 return session;
@@ -267,23 +261,38 @@ class SessionRecord {
 
     closeSession(session) {
         if (this.isClosed(session)) {
-            console.warn("Session already closed", session);
+            // console.warn("Session already closed", session);
             return;
         }
-        console.info("Closing session:", session);
+        // console.info("Closing session:", session);
         session.indexInfo.closed = Date.now();
     }
 
     openSession(session) {
         if (!this.isClosed(session)) {
-            console.warn("Session already open");
+            // console.warn("Session already open");
         }
-        console.info("Opening session:", session);
+        // console.info("Opening session:", session);
         session.indexInfo.closed = -1;
     }
 
     isClosed(session) {
         return session.indexInfo.closed !== -1;
+    }
+
+    updateSessionState(session) {
+        // this.removeOldChains(session);
+        this.setSession(session);
+        this.removeOldSessions();
+
+    }
+
+    archiveCurrentState() {
+        let open_session = this.getOpenSession();
+        if (open_session !== undefined) {
+            this.closeSession(open_session);
+            this.updateSessionState(open_session);
+        }
     }
 
     removeOldSessions() {
@@ -298,7 +307,7 @@ class SessionRecord {
                 }
             }
             if (oldestKey) {
-                console.info("Removing old closed session:", oldestSession);
+                // console.info("Removing old closed session:", oldestSession);
                 delete this.sessions[oldestKey];
             } else {
                 throw new Error('Corrupt sessions object');
@@ -307,8 +316,19 @@ class SessionRecord {
     }
 
     deleteAllSessions() {
-        for (const key of Object.keys(this.sessions)) {
-            delete this.sessions[key];
+        this.sessions = {};
+    }
+
+    detectDuplicateOpenSessions() {
+        let openSession;
+        let sessions = this.sessions;
+        for (const key in sessions) {
+            if (!this.isClosed(sessions[key])) {
+                if (openSession !== undefined) {
+                    throw new Error("Datastore inconsistensy: multiple open sessions");
+                }
+                openSession = sessions[key];
+            }
         }
     }
 }

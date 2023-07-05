@@ -4,6 +4,7 @@ const ChainType = require('./chain_type');
 const ProtocolAddress = require('./protocol_address');
 const SessionBuilder = require('./session_builder');
 const SessionRecord = require('./session_record');
+const Util = require('./util');
 const crypto = require('./crypto');
 const curve = require('./curve');
 const errors = require('./errors');
@@ -45,6 +46,7 @@ class SessionCipher {
         return `<SessionCipher(${this.addr.toString()})>`;
     }
 
+    /** @returns {Promise<import('./session_record')>} */
     async getRecord() {
         const record = await this.storage.loadSession(this.addr.toString());
         if (record && !(record instanceof SessionRecord)) {
@@ -102,6 +104,7 @@ class SessionCipher {
             result[0] = this._encodeTupleByte(VERSION, VERSION);
             result.set(msgBuf, 1);
             result.set(mac.slice(0, 8), msgBuf.byteLength + 1);
+            record.updateSessionState(session);
             await this.storeRecord(record);
             let type, body;
             if (session.pendingPreKey) {
@@ -140,7 +143,6 @@ class SessionCipher {
         if (!sessions.length) {
             throw new errors.SessionError("No sessions available");
         }   
-        const errs = [];
         for (const session of sessions) {
             let plaintext; 
             try {
@@ -151,12 +153,8 @@ class SessionCipher {
                     plaintext
                 };
             } catch(e) {
-                errs.push(e);
+                if (e.name == "MessageCounterError") break;
             }
-        }
-        console.error("Failed to decrypt message with any known session...");
-        for (const e of errs) {
-            console.error("Session error:" + e, e.stack);
         }
         throw new errors.SessionError("No matching sessions found for message");
     }
@@ -169,6 +167,10 @@ class SessionCipher {
                 throw new errors.SessionError("No session record");
             }
             const result = await this.decryptWithSessions(data, record.getSessions());
+            if (result.session.indexInfo.baseKey != (await this.getRecord()).getOpenSession().indexInfo.baseKey) {
+                record.archiveCurrentState();
+                record.openSession(result.session);
+            }
             const remoteIdentityKey = result.session.indexInfo.remoteIdentityKey;
             if (!await this.storage.isTrustedIdentity(this.addr.id, remoteIdentityKey)) {
                 throw new errors.UntrustedIdentityKeyError(this.addr.id, remoteIdentityKey);
@@ -179,8 +181,9 @@ class SessionCipher {
                 // was the most current.  Simply make a note of it and continue.  If our
                 // actual open session is for reason invalid, that must be handled via
                 // a full SessionError response.
-                console.warn("Decrypted message with closed session.");
+                // console.warn("Decrypted message with closed session.");
             }
+            record.updateSessionState(result.session);
             await this.storeRecord(record);
             return result.plaintext;
         });
@@ -205,6 +208,14 @@ class SessionCipher {
             const preKeyId = await builder.initIncoming(record, preKeyProto);
             const session = record.getSession(preKeyProto.baseKey);
             const plaintext = await this.doDecryptWhisperMessage(preKeyProto.message, session);
+            record.updateSessionState(session);
+
+            const openSession = record.getOpenSession();
+            if (session && openSession && !Util.isEqual(session.indexInfo.remoteIdentityKey, openSession.indexInfo.remoteIdentityKey)) {
+                record.archiveCurrentState();
+                record.openSession(session);
+            }
+
             await this.storeRecord(record);
             if (preKeyId) {
                 await this.storage.removePreKey(preKeyId);
