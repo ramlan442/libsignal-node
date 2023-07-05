@@ -65,7 +65,7 @@ class SessionBuilder {
         const existingOpenSession = record.getOpenSession();
         if (!signedPreKeyPair) { 
             if (existingOpenSession && existingOpenSession.currentRatchet) return;
-            throw new errors.PreKeyError("Missing SignedPreKey");
+            else throw new errors.PreKeyError("Missing SignedPreKey");
         }   
         if (existingOpenSession) {
             record.archiveCurrentState();
