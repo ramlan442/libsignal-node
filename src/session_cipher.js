@@ -136,45 +136,25 @@ class SessionCipher {
     }
 
     async decryptWithSessions(data, sessions) {
-        // Throw an error if no sessions are available
+        // Iterate through the sessions, attempting to decrypt using each one.
+        // Stop and return the result if we get a valid result.
         if (!sessions.length) {
             throw new errors.SessionError("No sessions available");
-        }
-
-        // Helper function to perform decryption
-        const attemptDecryption = async (session) => {
+        }   
+        for (const session of sessions) {
+            let plaintext; 
             try {
-                const plaintext = await this.doDecryptWhisperMessage(data, session);
+                plaintext = await this.doDecryptWhisperMessage(data, session);
                 session.indexInfo.used = Date.now();
                 return {
                     session,
                     plaintext
                 };
-            } catch (e) {
-                if (e.name == "MessageCounterError") {
-                    return false;
-                }
-                return undefined;
+            } catch(e) {
+                if (e.name == "MessageCounterError") break;
             }
-        };
-
-        // Iterate through the sessions, attempting to decrypt using each one.
-        // Stop and return the result if we get a valid result.
-        let result;
-        const found = sessions.some(async (session) => {
-            const decryptionResult = await attemptDecryption(session);
-            if (decryptionResult !== undefined) {
-                result = decryptionResult;
-                return true;
-            }
-            return false;
-        });
-
-        if (!found) {
-            throw new errors.SessionError("No matching sessions found for message");
         }
-
-        return result;
+        throw new errors.SessionError("No matching sessions found for message");
     }
 
     async decryptWhisperMessage(data) {
