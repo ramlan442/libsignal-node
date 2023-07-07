@@ -86,7 +86,7 @@ class SessionCipher {
             }
             this.fillMessageKeys(chain, chain.chainKey.counter + 1);
             const keys = crypto.deriveSecrets(chain.messageKeys[chain.chainKey.counter],
-                                              Buffer.alloc(32), Buffer.from("WhisperMessageKeys"));
+                Buffer.alloc(32), Buffer.from("WhisperMessageKeys"));
             delete chain.messageKeys[chain.chainKey.counter];
             const msg = protobufs.WhisperMessage.create();
             msg.ephemeralKey = session.currentRatchet.ephemeralKeyPair.pubKey;
@@ -94,13 +94,13 @@ class SessionCipher {
             msg.previousCounter = session.currentRatchet.previousCounter;
             msg.ciphertext = crypto.encrypt(keys[0], data, keys[2].slice(0, 16));
             const msgBuf = protobufs.WhisperMessage.encode(msg).finish();
-            const macInput = Buffer.alloc(msgBuf.byteLength + (33 * 2) + 1);
+            const macInput = Buffer.allocUnsafe(msgBuf.byteLength + (33 * 2) + 1);
             macInput.set(ourIdentityKey.pubKey);
-            macInput.set(session.indexInfo.remoteIdentityKey, 33);
+            macInput.set(remoteIdentityKey, 33);
             macInput[33 * 2] = this._encodeTupleByte(VERSION, VERSION);
             macInput.set(msgBuf, (33 * 2) + 1);
             const mac = crypto.calculateMAC(keys[1], macInput);
-            const result = Buffer.alloc(msgBuf.byteLength + 9);
+            const result = Buffer.allocUnsafe(msgBuf.byteLength + 9);
             result[0] = this._encodeTupleByte(VERSION, VERSION);
             result.set(msgBuf, 1);
             result.set(mac.slice(0, 8), msgBuf.byteLength + 1);
@@ -121,9 +121,7 @@ class SessionCipher {
                 }
                 body = Buffer.concat([
                     Buffer.from([this._encodeTupleByte(VERSION, VERSION)]),
-                    Buffer.from(
-                        protobufs.PreKeyWhisperMessage.encode(preKeyMsg).finish()
-                    )
+                    Buffer.from(protobufs.PreKeyWhisperMessage.encode(preKeyMsg).finish())
                 ]);
             } else {
                 type = 1;  // normal
@@ -138,25 +136,45 @@ class SessionCipher {
     }
 
     async decryptWithSessions(data, sessions) {
-        // Iterate through the sessions, attempting to decrypt using each one.
-        // Stop and return the result if we get a valid result.
+        // Throw an error if no sessions are available
         if (!sessions.length) {
             throw new errors.SessionError("No sessions available");
-        }   
-        for (const session of sessions) {
-            let plaintext; 
+        }
+
+        // Helper function to perform decryption
+        const attemptDecryption = async (session) => {
             try {
-                plaintext = await this.doDecryptWhisperMessage(data, session);
+                const plaintext = await this.doDecryptWhisperMessage(data, session);
                 session.indexInfo.used = Date.now();
                 return {
                     session,
                     plaintext
                 };
-            } catch(e) {
-                if (e.name == "MessageCounterError") break;
+            } catch (e) {
+                if (e.name == "MessageCounterError") {
+                    return false;
+                }
+                return undefined;
             }
+        };
+
+        // Iterate through the sessions, attempting to decrypt using each one.
+        // Stop and return the result if we get a valid result.
+        let result;
+        const found = sessions.some(async (session) => {
+            const decryptionResult = await attemptDecryption(session);
+            if (decryptionResult !== undefined) {
+                result = decryptionResult;
+                return true;
+            }
+            return false;
+        });
+
+        if (!found) {
+            throw new errors.SessionError("No matching sessions found for message");
         }
-        throw new errors.SessionError("No matching sessions found for message");
+
+        return result;
     }
 
     async decryptWhisperMessage(data) {

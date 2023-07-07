@@ -11,28 +11,17 @@ const _queueAsyncBuckets = new Map();
 const _gcLimit = 10000;
 
 async function _asyncQueueExecutor(queue, cleanup) {
-    let offt = 0;
-    while (true) {
-        let limit = Math.min(queue.length, _gcLimit); // Break up thundering hurds for GC duty.
-        for (let i = offt; i < limit; i++) {
-            const job = queue[i];
+    while (queue.length > 0) {
+        const limit = Math.min(queue.length, _gcLimit); // Break up thundering herds for GC duty.
+        const jobs = queue.splice(0, limit);
+        
+        await Promise.all(jobs.map(async (job) => {
             try {
                 job.resolve(await job.awaitable());
-            } catch(e) {
+            } catch (e) {
                 job.reject(e);
             }
-        }
-        if (limit < queue.length) {
-            /* Perform lazy GC of queue for faster iteration. */
-            if (limit >= _gcLimit) {
-                queue.splice(0, limit);
-                offt = 0;
-            } else {
-                offt = limit;
-            }
-        } else {
-            break;
-        }
+        }));
     }
     cleanup();
 }
