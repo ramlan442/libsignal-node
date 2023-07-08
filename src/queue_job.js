@@ -6,6 +6,21 @@
   */
 'use strict';
 
-module.exports = async function(bucket, awaitable) {
-    return await awaitable()
-};
+const Mutex = require('async-mutex').Mutex;
+const map = {};
+
+module.exports = function(bucket, awaitable) {
+    if(!map[bucket]) {
+        map[bucket] = new Mutex()
+    }
+
+    return map[bucket].runExclusive(
+        async () => {
+            try {
+                return Promise.resolve(await awaitable())
+            } catch (error) {
+                return Promise.reject(error)
+            }
+        }
+    )
+}
