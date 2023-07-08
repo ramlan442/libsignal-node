@@ -6,6 +6,6 @@
   */
 'use strict';
 
-module.exports = function(bucket, awaitable) {
+module.exports = async function(bucket, awaitable) {
     return await awaitable()
 };
