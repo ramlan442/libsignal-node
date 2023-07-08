@@ -13,5 +13,14 @@ module.exports = function(bucket, awaitable) {
     if(!map[bucket]) {
         map[bucket] = new Mutex()
     }
-    return map[bucket].runExclusive(async () => await awaitable())
+
+    return map[bucket].runExclusive(
+        async () => {
+            try {
+                return Promise.resolve(await awaitable())
+            } catch (error) {
+                return Promise.reject(error)
+            }
+        }
+    )
 }
