@@ -5,54 +5,20 @@
   * session io ops on the database.
   */
 'use strict';
-
-
-const _queueAsyncBuckets = new Map();
-const _gcLimit = 10000;
-
-async function _asyncQueueExecutor(queue, cleanup) {
-    while (queue.length > 0) {
-        const limit = Math.min(queue.length, _gcLimit); // Break up thundering herds for GC duty.
-        const jobs = queue.splice(0, limit);
-        
-        await Promise.all(jobs.map(async (job) => {
-            try {
-                job.resolve(await job.awaitable());
-            } catch (e) {
-                job.reject(e);
-            }
-        }));
-    }
-    cleanup();
-}
-
+const Mutex = require('async-mutex').Mutex;
+const map = {};
 module.exports = function(bucket, awaitable) {
-    /* Run the async awaitable only when all other async calls registered
-     * here have completed (or thrown).  The bucket argument is a hashable
-     * key representing the task queue to use. */
-    if (!awaitable.name) {
-        // Make debuging easier by adding a name to this function.
-        Object.defineProperty(awaitable, 'name', {writable: true});
-        if (typeof bucket === 'string') {
-            awaitable.name = bucket;
-        } else {
-            console.warn("Unhandled bucket type (for naming):", typeof bucket, bucket);
+    if(!map[bucket]) {
+        map[bucket] = new Mutex()
+    }
+
+    return map[bucket].runExclusive(
+        async () => {
+            try {
+                return Promise.resolve(await awaitable())
+            } catch (error) {
+                return Promise.reject(error)
+            }
         }
-    }
-    let inactive;
-    if (!_queueAsyncBuckets.has(bucket)) {
-        _queueAsyncBuckets.set(bucket, []);
-        inactive = true;
-    }
-    const queue = _queueAsyncBuckets.get(bucket);
-    const job = new Promise((resolve, reject) => queue.push({
-        awaitable,
-        resolve,
-        reject
-    }));
-    if (inactive) {
-        /* An executor is not currently active; Start one now. */
-        _asyncQueueExecutor(queue, () => _queueAsyncBuckets.delete(bucket));
-    }
-    return job;
+    )
 };
