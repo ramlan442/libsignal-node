@@ -8,11 +8,12 @@
 
  const withTimeout = require('async-mutex').withTimeout;
  const Mutex = require('async-mutex').Mutex;
- const map = {};
+ const TTLCache = require('@isaacs/ttlcache')
+ const cache = new TTLCache({ ttl: 60 * 1000, updateAgeOnGet: true })
  module.exports = function(bucket, awaitable) {
-     if(!map[bucket]) {
-         map[bucket] = withTimeout(new Mutex(), 30 * 1000)
+     if(!cache.has(bucket)) {
+         cache.set(bucket, withTimeout(new Mutex(), 30 * 1000))
      }
-     return map[bucket].runExclusive(awaitable)
+     return cache.get(bucket).runExclusive(awaitable)
  };
  

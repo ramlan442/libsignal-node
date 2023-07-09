@@ -11,6 +11,7 @@
   ],
   "license": "GPL-3.0",
   "dependencies": {
+    "@isaacs/ttlcache": "^1.4.1",
     "async-mutex": "^0.4.0",
     "curve25519-js": "^0.0.4",
     "protobufjs": "6.8.8"
