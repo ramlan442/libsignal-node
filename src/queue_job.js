@@ -14,6 +14,6 @@
      if(!cache.has(bucket)) {
          cache.set(bucket, withTimeout(new Mutex(), 30 * 1000))
      }
-     return cache.get(bucket).runExclusive(awaitable)
+     return cache.get(bucket)?.runExclusive(awaitable)
  };
  
